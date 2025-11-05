@@ -1,0 +1,40 @@
+# Requirements tối thiểu để chạy main.py
+# Dùng cho Raspberry Pi hoặc deployment
+
+# Core AI/ML (bắt buộc)
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+
+# Computer Vision (bắt buộc)
+opencv-python>=4.8.0
+Pillow>=9.5.0
+
+# GPIO cho Raspberry Pi (bắt buộc trên Pi)
+RPi.GPIO>=0.7.1
+
+# Utilities (bắt buộc)
+PyYAML>=6.0
+
+# Optional nhưng khuyến nghị
+scipy>=1.10.0
+
+# ============================================
+# HƯỚNG DẪN CÀI ĐẶT
+# ============================================
+#
+# 1. Trên Raspberry Pi:
+#    sudo apt update
+#    sudo apt install python3-opencv python3-rpi.gpio -y
+#    pip3 install ultralytics torch torchvision
+#
+# 2. Trên PC (để test - không có GPIO):
+#    pip install -r requirements_minimal.txt
+#    # Code sẽ tự động skip GPIO nếu không khả dụng
+#
+# 3. Cho máy tính có GPU:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+# ============================================
+

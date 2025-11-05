@@ -1,0 +1,31 @@
+# Core AI/ML
+ultralytics
+torch
+torchvision
+numpy
+
+# Computer Vision
+opencv-python
+Pillow
+
+# Text-to-Speech
+gtts
+playsound
+
+# Utilities
+PyYAML
+scipy
+tqdm
+
+# Optional (for training/analysis)
+matplotlib
+tensorboard
+wandb
+seaborn
+pandas
+scikit-learn
+
+# Optional (for model export)
+coremltools
+onnx
+thop
