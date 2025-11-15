@@ -19,13 +19,15 @@ logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
 # ======================== CAU HINH GPIO ========================
 BUZZER_PIN = 17  # GPIO17 (Physical pin 11) - Thay doi theo hardware cua ban
-BUZZER_DURATION = 2  # Bat coi 2 giay
 
 if GPIO_AVAILABLE:
     GPIO.setmode(GPIO.BCM)  # Dung BCM numbering
     GPIO.setup(BUZZER_PIN, GPIO.OUT)
     GPIO.output(BUZZER_PIN, GPIO.LOW)  # Tat coi ban dau
     print(f"[OK] GPIO initialized - Buzzer on GPIO{BUZZER_PIN}")
+
+# Bien theo doi trang thai buzzer
+buzzer_active = False
 
 # Load model YOLO
 # Thay doi duong dan model neu can
@@ -54,26 +56,28 @@ detection_counts = {class_name: 0 for class_name in alert_cooldowns.keys()}
 
 
 # ======================== HAM DIEU KHIEN COI (GPIO) ========================
-def trigger_buzzer(class_name):
-    """Bat coi canh bao qua GPIO"""
-    print(f"[ALERT] Phat hien {class_name}!")
-
+def set_buzzer(state):
+    """Bat/Tat coi canh bao qua GPIO"""
+    global buzzer_active
+    
     if GPIO_AVAILABLE:
         try:
-            # Bat coi
-            GPIO.output(BUZZER_PIN, GPIO.HIGH)
-            print(f"[BUZZER ON] GPIO{BUZZER_PIN}")
-
-            # Giu coi bat trong BUZZER_DURATION giay
-            time.sleep(BUZZER_DURATION)
-
-            # Tat coi
-            GPIO.output(BUZZER_PIN, GPIO.LOW)
-            print(f"[BUZZER OFF]")
+            if state and not buzzer_active:
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                buzzer_active = True
+                print(f"[BUZZER ON] GPIO{BUZZER_PIN}")
+            elif not state and buzzer_active:
+                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                buzzer_active = False
+                print(f"[BUZZER OFF]")
         except Exception as e:
             print(f"[ERROR GPIO] {e}")
     else:
-        print("[WARNING] GPIO khong kha dung - Chi hien thi canh bao")
+        if state and not buzzer_active:
+            buzzer_active = True
+            print("[WARNING] GPIO khong kha dung - Chi hien thi canh bao")
+        elif not state and buzzer_active:
+            buzzer_active = False
 
 
 # Da bo: speak_alert(), record_video(), Telegram, Weather API
@@ -135,7 +139,8 @@ def process_camera():
             break
 
         # Du doan bang YOLO voi verbose=False de tat thong bao
-        results = model(frame, conf=0.65, verbose=False)
+        # Giam image size xuong 416 de tang toc do (FPS cao hon)
+        results = model(frame, conf=0.65, verbose=False, imgsz=416)
         annotated_frame = results[0].plot()
 
         current_time = time.time()
@@ -156,25 +161,28 @@ def process_camera():
         if detected_classes:  # Neu co hanh vi duoc phat hien
             detected_behavior = list(detected_classes)[0]
 
-        # Xu ly canh bao va ghi video cho cac hanh vi nguy hiem
+        # Kiem tra co hanh vi nguy hiem nao dang xay ra khong
+        danger_detected = False
+        
+        # Xu ly canh bao cho cac hanh vi nguy hiem
         for class_name in alert_cooldowns:
             if class_name in detected_classes:
+                danger_detected = True
                 if detection_start_times[class_name] is None:
                     detection_start_times[class_name] = current_time
                 else:
                     elapsed_time = current_time - detection_start_times[class_name]
                     if elapsed_time >= DETECTION_DURATION_THRESHOLD:
-                        cooldown = alert_cooldowns[class_name]
-                        last_time = last_alert_times[class_name]
-
-                        if current_time - last_time > cooldown:
-                            detection_counts[class_name] += 1
-                            # Kich hoat coi canh bao
-                            trigger_buzzer(class_name)
-                            last_alert_times[class_name] = current_time
-                            detection_start_times[class_name] = None
+                        # Bat coi lien tuc khi phat hien nguy hiem
+                        set_buzzer(True)
+                        detection_counts[class_name] += 1
+                        last_alert_times[class_name] = current_time
             else:
                 detection_start_times[class_name] = None
+        
+        # Tat coi khi khong con hanh vi nguy hiem
+        if not danger_detected:
+            set_buzzer(False)
 
         # Hien thi thong tin tren khung hinh OpenCV
         current_time_str = time.strftime("%H:%M:%S %d/%m/%Y")
