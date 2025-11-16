@@ -2,12 +2,12 @@ train: ../train/images
 val: ../valid/images
 test: ../test/images
 
-nc: 5
-names: ['awake', 'drowsy', 'talking_phone', 'texting_phone', 'turning']
+nc: 3
+names: ['awake', 'drowsy', 'use_phone']
 
 roboflow:
   workspace: myproject-p1mhj
-  project: lv3_003_tai_xe_ngu_gat-etzes
+  project: detect_tai_xe_2class-dmyig
   version: 2
   license: CC BY 4.0
-  url: https://universe.roboflow.com/myproject-p1mhj/lv3_003_tai_xe_ngu_gat-etzes/dataset/2
+  url: https://universe.roboflow.com/myproject-p1mhj/detect_tai_xe_2class-dmyig/dataset/2

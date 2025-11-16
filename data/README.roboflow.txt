@@ -1,8 +1,8 @@
 
-LV3_003_tai_xe_ngu_gat - v2 2025-11-09 3:15pm
+detect_tai_xe_2class - v2 2025-11-16 5:49pm
 ==============================
 
-This dataset was exported via roboflow.com on November 9, 2025 at 8:20 AM GMT
+This dataset was exported via roboflow.com on November 16, 2025 at 10:50 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -18,15 +18,13 @@ visit https://github.com/roboflow/notebooks
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
 The dataset includes 1188 images.
-Objects are annotated in YOLOv8 format.
+Objects-XIJF are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
-* Auto-orientation of pixel data (with EXIF-orientation stripping)
-* Resize to 512x512 (Stretch)
 
 The following augmentation was applied to create 3 versions of each source image:
 * 50% probability of horizontal flip
-* Random brigthness adjustment of between -40 and +40 percent
-* Salt and pepper noise was applied to 2.51 percent of pixels
+* Random rotation of between -7 and +7 degrees
+* Salt and pepper noise was applied to 1.01 percent of pixels
 
 

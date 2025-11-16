@@ -2,9 +2,9 @@ import cv2
 from ultralytics import YOLO
 import time
 import threading
-import tkinter as tk
-from tkinter import ttk
 import logging
+from flask import Flask, render_template, Response, jsonify
+import base64
 
 # GPIO cho Raspberry Pi
 try:
@@ -18,42 +18,51 @@ except ImportError:
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
 # ======================== CAU HINH GPIO ========================
-BUZZER_PIN = 17  # GPIO17 (Physical pin 11) - Thay doi theo hardware cua ban
+BUZZER_PIN = 17  # GPIO17 (Physical pin 11)
 
 if GPIO_AVAILABLE:
-    GPIO.setmode(GPIO.BCM)  # Dung BCM numbering
+    GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUZZER_PIN, GPIO.OUT)
-    GPIO.output(BUZZER_PIN, GPIO.LOW)  # Tat coi ban dau
+    GPIO.output(BUZZER_PIN, GPIO.LOW)
     print(f"[OK] GPIO initialized - Buzzer on GPIO{BUZZER_PIN}")
 
 # Bien theo doi trang thai buzzer
 buzzer_active = False
 
 # Load model YOLO
-# Thay doi duong dan model neu can
-model = YOLO("best.pt")  # Model da train voi 5 classes
-print("[OK] Model loaded: best.pt")
+model = YOLO("best_3.pt")
+print("[OK] Model loaded: best_3.pt")
 
-# Ánh xạ class ID sang tên nhãn (CHỈ HOẠT ĐỘNG KHI DÙNG MODEL ĐÃ TRAIN)
+# Anh xa class ID sang ten nhan
 class_names = {
     0: "awake",
     1: "drowsy",
-    2: "texting_phone",
-    3: "turning",
-    4: "talking_phone",
+    2: "use_phone"
 }
 
-# Cấu hình cảnh báo
-alert_cooldowns = {"drowsy": 15, "texting_phone": 10, "talking_phone": 8, "turning": 5}
+# Cau hinh canh bao
+alert_cooldowns = {"drowsy": 10, "use_phone": 10}
 
-# Thời gian yêu cầu hành vi kéo dài để phát cảnh báo
+# Thoi gian yeu cau hanh vi keo dai de phat canh bao
 DETECTION_DURATION_THRESHOLD = 3
 
-# Từ điển lưu thời gian và số lần phát hiện
+# Tu dien luu thoi gian va so lan phat hien
 detection_start_times = {class_name: None for class_name in alert_cooldowns.keys()}
 last_alert_times = {class_name: 0 for class_name in alert_cooldowns.keys()}
 detection_counts = {class_name: 0 for class_name in alert_cooldowns.keys()}
 
+# Thoi gian bat dau lai xe
+start_time = time.time()
+
+# Bien toan cuc luu trang thai
+current_behavior = "Chua phat hien"
+current_status = {
+    "behavior": "Chua phat hien",
+    "time": "",
+    "driving_time": 0,
+    "buzzer_active": False,
+    "fps": 0
+}
 
 # ======================== HAM DIEU KHIEN COI (GPIO) ========================
 def set_buzzer(state):
@@ -75,72 +84,45 @@ def set_buzzer(state):
     else:
         if state and not buzzer_active:
             buzzer_active = True
-            print("[WARNING] GPIO khong kha dung - Chi hien thi canh bao")
         elif not state and buzzer_active:
             buzzer_active = False
 
-
-# Da bo: speak_alert(), record_video(), Telegram, Weather API
-
-# Thoi gian bat dau lai xe
-start_time = time.time()
-
-# Khoi tao GUI bang tkinter
-root = tk.Tk()
-root.title("Driver Monitoring System")
-root.geometry("400x300")
-root.resizable(False, False)
-
-# Cac nhan hien thi trang thai
-status_label = ttk.Label(root, text="Trang thai: Dang chay", font=("Arial", 12))
-status_label.pack(pady=10)
-
-behavior_label = ttk.Label(root, text="Hanh vi: Chua phat hien", font=("Arial", 10))
-behavior_label.pack(pady=5)
-
-time_label = ttk.Label(root, text="Thoi gian: Dang cap nhat", font=("Arial", 10))
-time_label.pack(pady=5)
-
-driving_time_label = ttk.Label(root, text="Thoi gian lai: 0 phut", font=("Arial", 10))
-driving_time_label.pack(pady=5)
-
-
-# Ham cap nhat GUI voi mau sac (da bo weather)
-def update_gui(behavior, current_time_str, driving_time):
-    behavior_label.config(text=f"Hanh vi: {behavior}")
-    if behavior == "awake":
-        behavior_label.config(foreground="green")  # Xanh la cho trang thai tinh tao
-    elif behavior in alert_cooldowns:  # Cac hanh vi nguy hiem
-        behavior_label.config(foreground="red")  # Do cho hanh vi nguy hiem
-    else:
-        behavior_label.config(foreground="black")  # Den cho "Chua phat hien"
-
-    time_label.config(text=f"Thoi gian: {current_time_str}")
-    driving_time_label.config(text=f"Thoi gian lai: {driving_time:.0f} phut")
-    root.update()
-
+# ======================== FLASK APP ========================
+app = Flask(__name__)
 
 # Mo webcam
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_FPS, 30)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Giam buffer de giam delay
 
-# Bien dieu khien vong lap
+# Bien dieu khien
 running = True
-
+frame_lock = threading.Lock()
+latest_frame = None
+latest_frame_time = 0
 
 def process_camera():
     """Xu ly camera trong thread rieng"""
-    global running
+    global running, latest_frame, current_status, latest_frame_time
+    
+    fps_start_time = time.time()
+    fps_counter = 0
+    current_fps = 0
+    frame_time_sum = 0
 
-    while cap.isOpened() and running:
+    while running:
+        frame_start = time.time()
+        
         ret, frame = cap.read()
         if not ret:
             print("[ERROR] Khong the lay du lieu tu webcam!")
-            running = False
-            break
+            time.sleep(0.1)
+            continue
 
-        # Du doan bang YOLO voi verbose=False de tat thong bao
-        # Giam image size xuong 416 de tang toc do (FPS cao hon)
-        results = model(frame, conf=0.65, verbose=False, imgsz=416)
+        # Du doan bang YOLO - Giam image size de tang FPS
+        results = model(frame, conf=0.65, verbose=False, imgsz=320)
         annotated_frame = results[0].plot()
 
         current_time = time.time()
@@ -156,9 +138,9 @@ def process_camera():
             detected_classes.add(class_name)
 
         # Xu ly hanh vi va phat canh bao
-        detected_behavior = "Chua phat hien"  # Gia tri mac dinh
+        detected_behavior = "Chua phat hien"
 
-        if detected_classes:  # Neu co hanh vi duoc phat hien
+        if detected_classes:
             detected_behavior = list(detected_classes)[0]
 
         # Kiem tra co hanh vi nguy hiem nao dang xay ra khong
@@ -173,7 +155,6 @@ def process_camera():
                 else:
                     elapsed_time = current_time - detection_start_times[class_name]
                     if elapsed_time >= DETECTION_DURATION_THRESHOLD:
-                        # Bat coi lien tuc khi phat hien nguy hiem
                         set_buzzer(True)
                         detection_counts[class_name] += 1
                         last_alert_times[class_name] = current_time
@@ -184,69 +165,117 @@ def process_camera():
         if not danger_detected:
             set_buzzer(False)
 
-        # Hien thi thong tin tren khung hinh OpenCV
+        # Tinh FPS thuc te
+        frame_time = time.time() - frame_start
+        frame_time_sum += frame_time
+        fps_counter += 1
+        
+        elapsed_fps_time = current_time - fps_start_time
+        if elapsed_fps_time >= 1.0:
+            current_fps = int(fps_counter / elapsed_fps_time)
+            avg_frame_time = frame_time_sum / fps_counter if fps_counter > 0 else 0
+            fps_counter = 0
+            frame_time_sum = 0
+            fps_start_time = current_time
+            print(f"[FPS] {current_fps} fps (avg frame time: {avg_frame_time*1000:.1f}ms)")
+
+        # Hien thi thong tin tren khung hinh
         current_time_str = time.strftime("%H:%M:%S %d/%m/%Y")
-        cv2.putText(
-            annotated_frame,
-            current_time_str,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-        )
-        cv2.putText(
-            annotated_frame,
-            f"Hanh vi: {detected_behavior}",
-            (10, 60),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-        )
+        
+        # Them thong tin status
+        cv2.putText(annotated_frame, current_time_str, (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"Hanh vi: {detected_behavior}", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"FPS: {current_fps}", (10, 90), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        if buzzer_active:
+            cv2.putText(annotated_frame, "CANH BAO!", (10, 120), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
 
-        # Lap lich cap nhat GUI tu thread chinh
-        root.after(
-            0, lambda: update_gui(detected_behavior, current_time_str, driving_time)
-        )
+        # Cap nhat trang thai hien tai
+        current_status = {
+            "behavior": detected_behavior,
+            "time": current_time_str,
+            "driving_time": round(driving_time, 1),
+            "buzzer_active": buzzer_active,
+            "fps": current_fps
+        }
 
-        # Hien thi frame OpenCV
-        cv2.imshow("Driver Monitoring", annotated_frame)
+        # Luu frame moi nhat (chi luu neu co su thay doi)
+        with frame_lock:
+            latest_frame = annotated_frame
+            latest_frame_time = current_time
 
-        # Nhan 'q' de thoat
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            running = False
-            break
+def generate_frames():
+    """Generator de stream video"""
+    last_yield_time = 0
+    min_interval = 0.033  # ~30 fps max
+    
+    while running:
+        current_time = time.time()
+        
+        # Throttle frame rate de tranh overload
+        if current_time - last_yield_time < min_interval:
+            time.sleep(0.01)
+            continue
+            
+        with frame_lock:
+            if latest_frame is None:
+                time.sleep(0.01)
+                continue
+            frame = latest_frame
+        
+        # Encode frame thanh JPEG voi quality thap hon de giam size
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        last_yield_time = current_time
+        
+        # Yield frame theo dinh dang multipart
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
+@app.route('/')
+def index():
+    """Trang chu"""
+    return render_template('index.html')
 
-# Ham don dep khi thoat
-def on_closing():
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route"""
+    return Response(generate_frames(),
+                   mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/status')
+def status():
+    """API tra ve trang thai hien tai"""
+    return jsonify(current_status)
+
+def cleanup():
+    """Don dep khi thoat"""
     global running
     running = False
     cap.release()
-    cv2.destroyAllWindows()
-    root.quit()
-    root.destroy()
+    if GPIO_AVAILABLE:
+        GPIO.cleanup()
+    print("[OK] Cleanup completed")
 
-
-# Xu ly su kien dong cua so
-root.protocol("WM_DELETE_WINDOW", on_closing)
-
-# Khoi tao va chay camera thread
-camera_thread = threading.Thread(target=process_camera, daemon=True)
-camera_thread.start()
-
-# Chay GUI tren main thread
-try:
-    root.mainloop()
-except KeyboardInterrupt:
-    print("\n[WARNING] Thoat chuong trinh...")
-finally:
-    on_closing()
-
-# Cleanup GPIO
-if GPIO_AVAILABLE:
-    GPIO.cleanup()
-    print("[OK] GPIO cleanup completed")
-
-print("[OK] Chuong trinh ket thuc")
+if __name__ == '__main__':
+    try:
+        # Bat dau camera thread
+        camera_thread = threading.Thread(target=process_camera, daemon=True)
+        camera_thread.start()
+        
+        print("[OK] Starting web server on http://0.0.0.0:5000")
+        print("[INFO] Truy cap tu may khac: http://<IP_cua_Pi>:5000")
+        
+        # Chay Flask server
+        app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    except KeyboardInterrupt:
+        print("\n[WARNING] Thoat chuong trinh...")
+    finally:
+        cleanup()
