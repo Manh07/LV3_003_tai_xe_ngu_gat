@@ -36,12 +36,11 @@ print("[OK] Model loaded: best_3.pt")
 # Anh xa class ID sang ten nhan
 class_names = {
     0: "awake",
-    1: "drowsy",
-    2: "use_phone"
+    1: "drowsy"
 }
 
 # Cau hinh canh bao
-alert_cooldowns = {"drowsy": 10, "use_phone": 10}
+alert_cooldowns = {"drowsy": 15}
 
 # Thoi gian yeu cau hanh vi keo dai de phat canh bao
 DETECTION_DURATION_THRESHOLD = 3
